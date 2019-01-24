@@ -1,0 +1,330 @@
+---
+title: "Project - Titanic Survival Prediction"
+author: "Edwin Leonardi Liong"
+date: "January 8, 2019"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE)
+```
+
+##Introduction
+
+It has been over a century since the RMS Titanic sank on its maiden voyage in 1912. The ship was carrying estimated 2224 passengers, but only less than 800 passengers survived the tragic accident. For many decades, the tragic story has been gaining attention from researchers and media all over the world. A blockbuster movie in 1997 also helped catapulted people interest. 
+
+In this project, we will attempt to predict the probability of a passenger surviving from the disaster given a set of attributes of the passenger. This problem is categorised as a classification, that is when the outcome target is a category and in this instance, is either survived or not survived. This project is a great choice for learning experience and analysis due to the small size of dataset and relatable variables.
+
+Later on, we are going to apply supervised machine learning algorithms that work best for answering the classification question. Throughout this journey, we may come across interesting results that allow us to make few insights regarding the data.
+
+##Dataset - Exploration and Preparation
+
+Titanic data is publicly available for download. First we will go through the dataset to study the structure and its completeness. At the same time, we check which attribute(s) that can be used as the predictor and which may need to be removed from the dataset.
+
+Let's start by importing the required libraries and downloading the data
+
+```{r}
+#importing libraries
+library(tidyverse)
+library(scales)
+library(caret)
+library(dplyr)
+library(purrr)
+library(Hmisc)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+library(ROCR)
+library(knitr)
+library(e1071)
+
+set.seed(1)
+
+#downloading titanic full data set from url and assign empty string or blank values to NA
+titanic_data <- read.csv("http://biostat.mc.vanderbilt.edu/wiki/pub/Main/DataSets/titanic3.csv",na.strings=c("","NA"))
+```
+
+We then run this script and find that the dataset contains 1309 passenger details along with the 14 variables 
+
+```{r}
+#observe the structure of the data and its content
+head(titanic_data)
+str(titanic_data)
+describe(titanic_data)
+```
+
+The variables are analyzed as below
+
+**survived** is the survival outcome of the passenger and it is also defined as our dependent variable (prediction). The mean value shows that the survival rate was 38%. No missing values detected. With just two possible values, the variable is converted to a factor
+
+```{r}
+titanic_data$survived<-as.factor(titanic_data$survived)
+```
+
+**pclass** has 3 distinct values: first, second and third class. No missing values detected. This is to be treated as categorical attribute, hence the conversion to data type factor. On the plot below, we can see that 3rd class passengers are in a higher proportion for not to survive compared to the other classes
+
+```{r}
+titanic_data$pclass<-as.factor(titanic_data$pclass)
+titanic_data %>% ggplot(aes(pclass,fill=survived)) + geom_bar(aes(y = (..count..)/sum(..count..)), position="dodge") + ylab("Rate %") + ggtitle("Survival Rate By Passenger Class") 
+```
+
+**name** attribute has 1307 distinct values. It does make sense that name should not have any influence towards one survival. We can drop the name attribute for now 
+
+**sex** attribute is either male or female. No missing value detected. Gender should be in a factor type.     
+```{r}
+titanic_data$sex<-as.factor(titanic_data$sex)
+titanic_data %>% ggplot(aes(sex,fill=survived)) + geom_bar(aes(y = (..count..)/sum(..count..)), position="dodge") + ylab("Rate %") + ggtitle("Survival Rate By Passenger Sex") 
+titanic_data %>% ggplot(aes(pclass,fill=survived)) + geom_bar(aes(y = (..count..)/sum(..count..)),   position="dodge") + facet_wrap(~sex) +ylab("Rate %") +  ggtitle("Survival Rate By Passenger Class and Sex") 
+```
+ 
+60% passengers are male. Despite this, male survival rate is not as good as the female counterpart. When sliced further by passenger class, it appears that 3rd class male passengers have the worst odds for survival. Also note that 3rd class female passengers are less likely to survive compared to being in 1st or 2nd class. This is in line with our quick analysis earlier on the pclass plot
+
+**age** does have a quite number of missing values. Though so, it is still worth keeping for the model. The missing values will be populated using the mean of the passengers within the same pclass. Age statistics before imputation is shown in the distribution below    
+
+```{r}
+titanic_data %>% ggplot(aes(age, fill = survived))+
+    geom_histogram(binwidth = 5, colour = "black", position = "dodge",alpha=1)+
+    theme_bw()+ggtitle("Histogram - Age Distribution Of Passengers (Before Imputation)") +ylab("No of Passengers") 
+titanic_data %>% ggplot(aes(age, fill = survived))+
+    geom_histogram(binwidth = 5, colour = "black", position = "dodge",alpha=1)+
+    theme_bw()+ ggtitle("Histogram - Age Distribution By Passenger Class (Before Imputation)") +facet_wrap(~pclass) +ylab("No of Passengers") 
+```
+
+**sibsp** attribute indicates the number of siblings/spouses aboard the ship. No missing values detected so the feature is good to use.     
+
+```{r}
+titanic_data %>% ggplot(aes(sibsp,fill=survived)) + geom_bar(aes(y = (..count..)/sum(..count..)), position="dodge") + ylab("Rate %") + ggtitle("Survival Rate By Number of Siblings/Spouses") 
+```
+
+**parch** refers to the number of parent/children aboard the ship. No missing values detected so the feature is good to use.
+
+```{r}
+titanic_data %>% ggplot(aes(parch,fill=survived)) + geom_bar(aes(y = (..count..)/sum(..count..)), position="dodge") + ylab("Rate %") + ggtitle("Survival Rate By Number of Parents/Children") +  scale_x_continuous(breaks = scales::pretty_breaks(15))
+ ```
+ 
+**ticket** is one of the categorical attributes, however since it has too many unique values, this may not serve much purpose. We will leave this one off as a predictor 
+ 
+**fare** attribute can be a good feature to include. With 1 missing value, this can be tacked in similar fashion as the age imputation.
+ 
+```{r}
+titanic_data %>% ggplot(aes(fare))+ geom_histogram(binwidth = 5, colour = "black", position = "dodge",alpha=1)+
+    theme_bw()+ ggtitle("Histogram - Fare Distribution") +ylab("No of Passengers") 
+```
+
+**cabin** variable has many missing values. It is reasonable not to omit the rows from the dataset and also imputation strategy will not be a good idea. Thus, cabin needs to be dropped from the dataset
+
+We can potentially include **embarked** attribute which is the port of Embarkation (C = Cherbourg; Q = Queenstown; S = Southampton). But before, the 2 missing values will be populated using the mode, which should be a fair and quick solution. In a glance, we can't deduce if the embarkation port is a significant factor to one's survival.
+**boat**, **body** and **home.dest** can be removed from the dataset mainly because of the high number of missing values
+
+```{r}
+titanic_data$embarked<-as.factor(titanic_data$embarked)
+titanic_data %>% ggplot(aes(embarked,fill=survived)) + geom_bar(aes(y = (..count..)/sum(..count..)), position="dodge") +  ylab("Rate %") + ggtitle("Survival Rate By Port of Embarkation") 
+```
+
+The following is the script along with comments to highlight the data preparation and imputation exercise 
+
+```{r}
+#get the mean values of age and fare by passenger class and store them as data frames
+titanic_class_age_mean <- titanic_data %>% filter(!is.na(age)) %>% group_by(pclass) %>% dplyr::summarise(class_age_mean=mean(age)) %>% as.data.frame(.)
+titanic_class_fare_mean <- titanic_data %>% filter(!is.na(fare)) %>% group_by(pclass) %>% dplyr::summarise(class_fare_mean=mean(fare)) %>% as.data.frame(.)
+
+#function to calculate mode value 
+Mode <- function(x) {
+u <- unique(x)
+u[which.max(tabulate(match(x, u)))]
+}
+
+#get mode value of embarked
+mode_embarked <- Mode(titanic_data$embarked)
+
+#join data frames obtained with the main titanic_data set 
+titanic_data <- inner_join(titanic_data,titanic_class_age_mean,by="pclass") 
+titanic_data <- inner_join(titanic_data,titanic_class_fare_mean,by="pclass") 
+
+#replace the age, embarked and fare values with the logical condition for imputation
+titanic_data <- mutate(titanic_data,age = if_else(is.na(age), class_age_mean, age), fare=if_else(is.na(fare), class_fare_mean, fare)) 
+titanic_data <- mutate(titanic_data,embarked = if_else(is.na(embarked),mode_embarked,embarked)) 
+
+#drop attributes that will not be used in the modelling
+titanic_data<-titanic_data%>%select(-name,-class_age_mean,-class_fare_mean,-boat,-ticket,-body,-cabin,-home.dest)
+```
+
+Run the describe() again, and this time we are down with 8 variables and no missing values detected. All is ready to go. Note that the age mean before and after imputation is rouglhy similar 29.88 and 29.35 respectively. 
+
+```{r}
+describe(titanic_data)
+```
+
+Our next step is to split the full dataset into training and test set. 20% ratio is chosen for the test
+
+```{r}
+#split data into train and test dataset
+test_index<-createDataPartition(y=titanic_data$survived,times=1,p=0.2,list=FALSE)
+titanic_train<-titanic_data[-test_index,]
+titanic_test<-titanic_data[test_index,]
+
+#check the result of the split
+dim(titanic_train)
+dim(titanic_test)
+```
+
+##Modeling Approach and Result
+
+In this section, we are going to create and discuss about the prediction modelling based on supervised learning technique. First, we will implement the logistic regression and then construct decision tree algorithm for comparison 
+
+###1. Binomial Logistic Regression
+
+Logistic Regression is often used for prediction analysis where the dependent variable is of a categorical type. The outcome of Titanic prediction is also a category makes this a fit candidate for logistic regression. Logistic regression can be binomial or multinomial.
+
+In logistic regression, prediction is made with the use of probability. In the Titanic scenario, we agree that straightforward outcomes are:
+
+* 0 = 0% the passenger would not survive
+* 1 = 100% the passenger would survive
+
+However, any value between 0-1 denotes a certain degree of confidence on the survival. 
+Therefore, we can formulate in such a way that if model output is above than 0.5, we will categorize it as 'survived'. Anything below 0.5, we treat as 'not survived'. This then reinforces our regression to be a binomial.
+
+```{r}
+#1st Model - Binomial Logistic Regression
+glm_fit <- titanic_train %>% glm(survived ~ ., data=., family = "binomial")
+summary(glm_fit)
+```
+
+We can see that variables pclass, sex, age, sibsp are statistically significant. Sex is shown to have strong correlation with survival.  If the passenger is male, then the odds reduced by 2.53. A unit increase in age also reduces the odds by 0.043. Not surprisingly being a 2nd or 3rd class passenger lowers the odds significantly. Interestingly, we find a little bit of a factor of port of embarkation (Southampton) in the model.
+
+We also identify a gap between the null deviance and residual deviance attributed to each of the statistically significant variables, especially with sex (reducing the residual deviance by 278). The table below lists the variables with the respective reduction of deviance
+
+```{r}
+anova(glm_fit,test="Chisq")
+```
+
+Now, we are going to evaluate how well the logistic regression model against the test data
+
+```{r}
+#1st Model - Prediction and Accuracy
+p_hat <- predict(glm_fit, newdata = titanic_test, type = "response")
+y_hat <- ifelse(p_hat > 0.5, 1, 0) %>% factor
+cm <- confusionMatrix(y_hat, titanic_test$survived)
+cm
+accuracy<-cm$overall['Accuracy']
+accuracy
+```
+
+The accuracy hits 0.7939, which can be perceived as good. Sensitivity and specificity are relatively high. 
+
+To measure the model performance for the binary classification problem, we will analyze the True Positive Rate against the False Positive Rate Receiver Operating Characteristic Curve (ROC) / Area Under Curve (AUC). The higher AUC (closer to 1), the better the prediction ability of the model
+
+```{r}
+#Plot ROC curve
+predict_perf <- prediction(p_hat, titanic_test$survived)
+metric <- performance(predict_perf, measure = "tpr", x.measure = "fpr")
+plot(metric)
+abline(a=0, b=1)
+
+#Calculate AUC area
+auc <- performance(predict_perf, measure = "auc")
+auc
+```
+
+We can be satisfied with the auc 0.85, a good classifier. Let's save the result to data frame and  next we'll see if we can get a better result with Decision Tree
+
+```{r}
+results<- data_frame(method = "Binomial Logistic Regression", Accuracy = accuracy, AUC=as.numeric(auc@y.values))
+```
+
+###2. Decision Tree
+
+Another popular predictive modelling tool for classification is Decision Tree which produces a model that predicts outcome by using any attributes to split data repeatedly until it reaches the purity of the subsets. By plotting the decision tree, we can easily interpret which information gain is larger  from the attributes. 
+
+```{r}
+#2nd Model - Decision Tree 
+tree <- rpart(survived ~ ., data=titanic_train, method="class")
+rpart.plot(tree,type=4, cex=0.6, extra=101, box.palette="RdGn",branch.lty=3, shadow.col="gray", nn=TRUE)
+```
+
+Looking at the above tree plot, we can deduce as follows:
+
+* The gender of the passenger is the most important factor determining the survival, with being male above 9.5 years old has least possibility to survive. For male under 9.5 years old, having less than 2 siblings helps increase the odds to survive.
+* On the other leaf node (female), non-3rd class passengers have almost 20% survived chance. This possibly supports the theory that higher class female passengers might have be given the priority to be on the lifeboat. Age does not seem to have contributed in the female survival rate. Attributes like fare, port of embarkation and parents children relationship also play as survival factors for 1st class female passengers.
+
+
+Now, let's calculate the accuracy of the prediction model against the same test dataset
+
+```{r}
+#2nd Model - Prediction and Accuracy
+pred <- predict(tree, titanic_test, type="class")
+confusionMatrix(pred, titanic_test$survived)
+```
+
+The accuracy is slightly less than the one predicted with the Logistic Regression
+We do also need to consider that there may be a situation of overfitting in our decision tree.  Let's check by running the model against the train data
+
+```{r}
+#2nd Model - Check Overfitting
+pred_train <- predict(tree, titanic_train, type="class")
+confusionMatrix(pred_train, titanic_train$survived)
+```
+
+We get higher accuracy for training data compared to test data, which is not ideal.
+To address the issue, we can further work on the algorithm by repeated cross validation method with trainControl. 3 separate 10-fold validations are used 
+
+```{r}
+set.seed(1)
+folds = createMultiFolds(titanic_train$survived, k = 10, times = 3)
+control <- trainControl(method = "repeatedcv", index = folds)
+tree_cv <- train(survived ~ ., data = titanic_train, method = "rpart", trControl = control)
+rpart.plot(tree_cv$finalModel,type=4, cex=0.6, extra=101, box.palette="RdGn",branch.lty=3, shadow.col="gray", nn=TRUE)
+
+pred_cv <- predict(tree_cv, titanic_test)
+cm<-confusionMatrix(pred_cv, titanic_test$survived)
+cm
+accuracy<-cm$overall['Accuracy']
+accuracy
+```
+
+We have pruned the earlier tree and come up with a better accuracy result after cross-validation. Only sex, pclass and fare are considered in the new model. Now, if we run this model against the same train data, it yield more or less the same accuracy compared with running against test set.
+
+```{r}
+pred_cv_train <- predict(tree_cv, titanic_train)
+confusionMatrix(pred_cv_train, titanic_train$survived)$overall['Accuracy']
+```
+
+At this stage, we can accept the newer tree model as the better tree. Next, we are assessing it towards the performance metric (ROC curve and AUC)
+
+```{r}
+#Plot ROC curve
+pred_cv <- predict(tree_cv, titanic_test, type="prob")
+predict_perf_cv <- prediction(pred_cv[,2], titanic_test$survived)
+metric <- performance(predict_perf_cv, measure = "tpr", x.measure = "fpr")
+plot(metric)
+abline(a=0, b=1)
+#Calculate AUC area
+auc <- performance(predict_perf_cv, measure = "auc")
+auc
+```
+
+Performance wise, the decision tree has smaller AUC value compared to the Logistic Regression method
+
+```{r}
+results <- bind_rows(results, data_frame(method="Decision Tree", Accuracy = accuracy, AUC=as.numeric(auc@y.values)))
+```
+
+Finally, let's display the comparison result of both algorithms
+```{r}
+results
+```
+
+##Conclusion
+
+We began with the exploration on Titanic data set where we looked at the content and structure of the passengers data. We went through the attributes and provide some visualization for better grasp on how each feature related to survival rate. Furthermore, we made necessary type conversions on the variables and decided if the variable ws for keep or to be removed from the data set. Any missing values were identified and computed. Finally, the dataset was split into training and test set.
+
+We were able to produce predictive models for survival outcome using two different supervised machine learning algorithms, namely, binomial logistic regression and decision tree. Both models resulted in on-par accuracy (79%), however, binomial logistic regression performed much better in AUC, with as high as 85%, making it a satisfactory classifier.
+
+Despite this, we have not yet achieved greater accuracy, leaving the room for improvement. For a later stage, we can conduct thorough feature engineering on the data set and/or experiment few other algorithms. Overfitting may also be another area to research further.
+
+
+
+
