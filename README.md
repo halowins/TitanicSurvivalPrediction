@@ -6,10 +6,11 @@ We then applied supervised machine learning algorithms that work best for answer
 
 The project was written in R. 
 
-Following packages were required for library import
+Following packages were required for library import:
+
 library(tidyverse)
 library(scales)
-library(caret) 
+library(caret)
 library(dplyr) 
 library(purrr) 
 library(Hmisc) 
